@@ -58,6 +58,34 @@ button, input {
   margin: 4px 6px 4px 0;
 }
 .err { color: #b42318; }
+.ok { color: #2f6f3e; }
 .hint { color: #6b5a48; font-size: 0.92em; }
 label { display: block; margin: 8px 0; }
-.topbar { display: flex; justify-content: space-between; align-items: baseline; }
+.topbar { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.tabs { display: flex; gap: 4px; }
+.tab {
+  border: 1px solid #d9c9a3;
+  background: #fffdf6;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.tab.active {
+  background: var(--gold);
+  border-color: var(--gold);
+  color: #fff;
+}
+.dockpage {
+  background: #fff;
+  border: 1px solid #e4d8bf;
+  padding: 16px 18px;
+  border-radius: 12px;
+  max-width: 520px;
+}
+.feed {
+  margin-top: 12px;
+  border-top: 1px dashed #e4d8bf;
+  padding-top: 8px;
+}
+.feed h4 { margin: 4px 0 8px; }
+.feed ul { margin: 0; padding-left: 18px; }
+.feed li { font-size: 0.94em; line-height: 1.7; }

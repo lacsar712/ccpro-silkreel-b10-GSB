@@ -14,6 +14,25 @@ class UserRepo:
         return result.scalar_one_or_none()
 
 
+class FilatureRepo:
+    def __init__(self, session: AsyncSession):
+        self.session = session
+
+    async def get(self, for_update: bool = False) -> Filature | None:
+        stmt = select(Filature).order_by(Filature.id)
+        if for_update:
+            # 两名主管交叉改名时行锁串行化，只留一版
+            stmt = stmt.with_for_update()
+        result = await self.session.execute(stmt)
+        return result.scalars().first()
+
+    async def rename(self, mill: Filature, name: str) -> Filature:
+        mill.name = name
+        await self.session.commit()
+        await self.session.refresh(mill)
+        return mill
+
+
 class BasinRepo:
     def __init__(self, session: AsyncSession):
         self.session = session

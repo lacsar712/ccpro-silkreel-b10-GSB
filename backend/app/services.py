@@ -1,13 +1,24 @@
-"""缫丝盆门槛：标成已缫完须最近一次汤温落在 38～42℃。"""
+"""缫丝盆门槛：标成已缫完须最近一次汤温落在 38～42℃；坞名门槛：空名禁止保存。"""
 
 from app.models import Basin
 
 MIN_TEMP = 38.0
 MAX_TEMP = 42.0
+MAX_NAME_LEN = 120
 
 
 class RuleError(ValueError):
     pass
+
+
+def clean_filature_name(raw: object) -> str:
+    """回写坞名前的门槛：去空白，空名/超长一律拒收。"""
+    name = str(raw or "").strip()
+    if not name:
+        raise RuleError("坞名不能为空")
+    if len(name) > MAX_NAME_LEN:
+        raise RuleError(f"坞名最长 {MAX_NAME_LEN} 字")
+    return name
 
 
 def latest_temp(basin: Basin) -> float | None:

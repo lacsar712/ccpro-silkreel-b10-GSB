@@ -1,6 +1,14 @@
 import { render } from "preact";
 import { useEffect, useState } from "preact/hooks";
-import { api, clearToken, setToken, token } from "./api.js";
+import {
+  api,
+  clearToken,
+  clearUser,
+  getUser,
+  setToken,
+  setUser,
+  token,
+} from "./api.js";
 import "./app.css";
 
 const STATUS_LABEL = { soaking: "浸茧", reeling: "缫丝中", reeled: "已缫完" };
@@ -18,7 +26,8 @@ function Login({ onOk }) {
         body: JSON.stringify({ username, password }),
       });
       setToken(data.access_token);
-      onOk();
+      setUser(data.user);
+      onOk(data.user);
     } catch (ex) {
       setErr(ex.message);
     }
@@ -44,31 +53,42 @@ function Login({ onOk }) {
   );
 }
 
-function Yard() {
-  const [board, setBoard] = useState(null);
+function Topbar({ board, view, onNav, onLogout }) {
+  return (
+    <div class="topbar">
+      <div>
+        <h1>{board ? board.filature : "…"}</h1>
+        <p>{board ? board.riverside : ""} · 点盆登记汤温；已缫完须最近汤温 38～42℃</p>
+      </div>
+      <nav class="tabs">
+        <button class={view === "yard" ? "tab active" : "tab"} onClick={() => onNav("yard")}>
+          环盆作业台
+        </button>
+        <button class={view === "dock" ? "tab active" : "tab"} onClick={() => onNav("dock")}>
+          坞名专页
+        </button>
+        <button class="tab" onClick={onLogout}>退出</button>
+      </nav>
+    </div>
+  );
+}
+
+function fmtTime(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? iso : d.toLocaleString("zh-CN", { hour12: false });
+}
+
+function Yard({ board, refresh }) {
   const [picked, setPicked] = useState(null);
   const [temp, setTemp] = useState("40");
   const [err, setErr] = useState("");
 
-  async function refresh() {
-    const data = await api("/api/board");
-    setBoard(data);
-    if (picked) {
-      setPicked(data.basins.find((b) => b.id === picked.id) || data.basins[0]);
-    }
-  }
-
   useEffect(() => {
-    refresh().catch((e) => setErr(e.message));
-  }, []);
-
-  if (!board) {
-    return (
-      <div class="yard">
-        {err || "装载环盆…"}
-      </div>
-    );
-  }
+    if (picked) {
+      setPicked(board.basins.find((b) => b.id === picked.id) || null);
+    }
+  }, [board]);
 
   const n = board.basins.length;
   async function writeTemp() {
@@ -99,21 +119,7 @@ function Yard() {
   }
 
   return (
-    <div class="yard">
-      <div class="topbar">
-        <div>
-          <h1>{board.filature}</h1>
-          <p>{board.riverside} · 点盆登记汤温；已缫完须最近汤温 38～42℃</p>
-        </div>
-        <button
-          onClick={() => {
-            clearToken();
-            location.reload();
-          }}
-        >
-          退出
-        </button>
-      </div>
+    <div>
       <div class="ring">
         {board.basins.map((b, i) => {
           const angle = (Math.PI * 2 * i) / n - Math.PI / 2;
@@ -135,7 +141,7 @@ function Yard() {
       {picked && (
         <div class="drawer">
           <h3>
-            {picked.code} · {STATUS_LABEL[picked.status]}
+            {board.filature} · {picked.code} · {STATUS_LABEL[picked.status]}
           </h3>
           <p>最近汤温：{picked.latestTempC ?? "无"} ℃ · 记录 {picked.readingCount} 次</p>
           <input value={temp} onInput={(e) => setTemp(e.target.value)} />
@@ -145,6 +151,20 @@ function Yard() {
             <button onClick={() => setStatus("reeling")}>缫丝中</button>
             <button onClick={() => setStatus("reeled")}>已缫完</button>
           </div>
+          <div class="feed">
+            <h4>{board.filature} · 汤温流水</h4>
+            {picked.readings && picked.readings.length ? (
+              <ul>
+                {picked.readings.map((r) => (
+                  <li key={r.id}>
+                    {fmtTime(r.takenAt)} · {r.waterTempC}℃ · {r.operator}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p class="hint">暂无汤温记录</p>
+            )}
+          </div>
           {err && <p class="err">{err}</p>}
         </div>
       )}
@@ -152,9 +172,131 @@ function Yard() {
   );
 }
 
+function DockPage({ board, user, refresh }) {
+  const isAdmin = user.role === "admin";
+  const [name, setName] = useState(board.filature);
+  const [msg, setMsg] = useState("");
+  const [err, setErr] = useState("");
+
+  useEffect(() => {
+    setName(board.filature);
+  }, [board.filature]);
+
+  async function save(e) {
+    e.preventDefault();
+    setErr("");
+    setMsg("");
+    const trimmed = name.trim();
+    if (!trimmed) {
+      setErr("坞名不能为空");
+      return;
+    }
+    try {
+      await api("/api/filature/name", {
+        method: "POST",
+        body: JSON.stringify({ name: trimmed }),
+      });
+      await refresh();
+      setMsg("已保存，环面标题、抽屉抬头、汤温流水同步换新名。");
+    } catch (ex) {
+      setErr(ex.message);
+    }
+  }
+
+  return (
+    <div class="dockpage">
+      <h2>坞名专页</h2>
+      <p>
+        当前坞名：<strong>{board.filature}</strong>（{board.riverside}）
+      </p>
+      {isAdmin ? (
+        <form onSubmit={save} autocomplete="off">
+          <label>
+            新坞名
+            <input
+              name="filatureName"
+              value={name}
+              onInput={(e) => setName(e.target.value)}
+              placeholder="不能为空"
+            />
+          </label>
+          <button type="submit" disabled={!name.trim()}>
+            保存坞名
+          </button>
+          <p class="hint">
+            保存后环面标题、抽屉抬头、汤温流水同步换新名；空名禁止保存；改名不动盆位与汤温数字。
+          </p>
+        </form>
+      ) : (
+        <p class="hint">缫丝工仅可查看坞名，改名请联系主管。</p>
+      )}
+      {err && <p class="err">{err}</p>}
+      {msg && <p class="ok">{msg}</p>}
+    </div>
+  );
+}
+
+function Main({ user, onLogout }) {
+  const [board, setBoard] = useState(null);
+  const [view, setView] = useState("yard");
+  const [err, setErr] = useState("");
+
+  async function refresh() {
+    const data = await api("/api/board");
+    setBoard(data);
+    return data;
+  }
+
+  useEffect(() => {
+    refresh().catch((e) => setErr(e.message));
+  }, []);
+
+  return (
+    <div class="yard">
+      <Topbar board={board} view={view} onNav={setView} onLogout={onLogout} />
+      {err && <p class="err">{err}</p>}
+      {!board ? (
+        "装载环盆…"
+      ) : view === "yard" ? (
+        <Yard board={board} refresh={refresh} />
+      ) : (
+        <DockPage board={board} user={user} refresh={refresh} />
+      )}
+    </div>
+  );
+}
+
 function App() {
-  const [ready, setReady] = useState(Boolean(token()));
-  return ready ? <Yard /> : <Login onOk={() => setReady(true)} />;
+  const [user, setUserState] = useState(getUser());
+
+  useEffect(() => {
+    if (token() && !user) {
+      api("/api/auth/me")
+        .then((u) => {
+          setUser(u);
+          setUserState(u);
+        })
+        .catch(() => {
+          clearToken();
+          clearUser();
+        });
+    }
+  }, []);
+
+  if (token() && !user) return null;
+
+  return user ? (
+    <Main
+      user={user}
+      onLogout={() => {
+        clearToken();
+        clearUser();
+        setUserState(null);
+      }}
+    />
+  ) : (
+    <Login onOk={(u) => setUserState(u)} />
+  );
 }
 
 render(<App />, document.getElementById("app"));
