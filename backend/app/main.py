@@ -3,9 +3,9 @@ from quart.helpers import make_response
 
 from app.db import SessionLocal
 from app.models import Basin
-from app.repositories import BasinRepo, UserRepo
+from app.repositories import BasinRepo, FilatureRepo, UserRepo
 from app.security import make_token, parse_token, verify_password
-from app.services import RuleError, assert_can_set_status, latest_temp
+from app.services import RuleError, assert_can_set_status, clean_mill_name, latest_temp
 
 app = Quart(__name__)
 
@@ -33,6 +33,15 @@ async def load_user():
 def require_user():
     if g.user is None:
         return jsonify({"detail": "未登录"}), 401
+    return None
+
+
+def require_admin():
+    denied = require_user()
+    if denied:
+        return denied
+    if g.user.role != "admin":
+        return jsonify({"detail": "仅管理员可改坞名"}), 403
     return None
 
 
@@ -65,6 +74,9 @@ async def me():
 
 
 def _basin_json(basin: Basin) -> dict:
+    readings = sorted(
+        basin.readings or [], key=lambda r: (r.taken_at, r.id), reverse=True
+    )
     return {
         "id": basin.id,
         "code": basin.code,
@@ -72,6 +84,15 @@ def _basin_json(basin: Basin) -> dict:
         "ringIndex": basin.ring_index,
         "latestTempC": latest_temp(basin),
         "readingCount": len(basin.readings or []),
+        "readings": [
+            {
+                "id": r.id,
+                "waterTempC": r.water_temp_c,
+                "operator": r.operator,
+                "takenAt": r.taken_at.isoformat(),
+            }
+            for r in readings[:20]
+        ],
     }
 
 
@@ -90,6 +111,41 @@ async def board():
             "riverside": mill.riverside,
             "basins": [_basin_json(b) for b in basins],
         }
+
+
+def _filature_json(mill) -> dict:
+    return {"id": mill.id, "name": mill.name, "riverside": mill.riverside}
+
+
+@app.route("/api/filature")
+async def filature():
+    denied = require_user()
+    if denied:
+        return denied
+    async with SessionLocal() as session:
+        mill = await FilatureRepo(session).current()
+        if mill is None:
+            return jsonify({"detail": "尚无缫丝坞"}), 404
+        return _filature_json(mill)
+
+
+@app.route("/api/filature/name", methods=["PUT", "POST"])
+async def rename_filature():
+    denied = require_admin()
+    if denied:
+        return denied
+    body = await request.get_json(force=True)
+    try:
+        name = clean_mill_name((body or {}).get("name", ""))
+    except RuleError as exc:
+        return jsonify({"detail": str(exc)}), 400
+    async with SessionLocal() as session:
+        repo = FilatureRepo(session)
+        mill = await repo.current()
+        if mill is None:
+            return jsonify({"detail": "尚无缫丝坞"}), 404
+        await repo.rename(mill, name)
+        return _filature_json(mill)
 
 
 @app.route("/api/basins/<int:basin_id>/readings", methods=["POST"])

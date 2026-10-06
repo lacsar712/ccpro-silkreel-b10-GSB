@@ -14,6 +14,20 @@ class UserRepo:
         return result.scalar_one_or_none()
 
 
+class FilatureRepo:
+    def __init__(self, session: AsyncSession):
+        self.session = session
+
+    async def current(self) -> Filature | None:
+        result = await self.session.execute(select(Filature))
+        return result.scalars().first()
+
+    async def rename(self, mill: Filature, name: str) -> None:
+        # 单行单列 UPDATE：并发改名由数据库串行化，后提交者覆盖，只留一版。
+        mill.name = name
+        await self.session.commit()
+
+
 class BasinRepo:
     def __init__(self, session: AsyncSession):
         self.session = session
